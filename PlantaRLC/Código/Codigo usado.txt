@@ -1,0 +1,154 @@
+Codigo usado
+
+SIMULACION EN TIEMPO CONTINUO
+%% CONTINUO
+% Parámetros del circuito
+R1=1000;     % [Ohm]
+R2=220;      % [Ohm]
+R3=1000;     % [Ohm]
+L=1000e-6;   % [mHenrios]
+C=470e-6;    % [Faradios]
+V=4;         % [Voltios] 
+% Matrices
+A=[-R2/L -1/L; 1/C (1/C)*((-1/R1)-(1/R3))]; % [iL ; Vc]
+B=[1/L; 1/(R1*C)];
+CM=[0 1];
+D=0; 
+sys = ss(A,B,CM,D);
+step(4*sys) % Entrada Vi = 4
+title('Voltaje en el Capacitor')
+ylabel('Voltaje [V]')
+xlabel('Tiempo')
+
+
+SIMULACION EN TIEMPO DISCRETO
+% Create state space model
+sys = ss(A,B,CM,0);
+Ts = 7e-3;
+% Convert to discrete, where dt is your discrete time-step (in seconds)
+d_sys = c2d(sys, Ts,'zoh')
+[Ad, Bd, Cd, Dd] = ssdata(d_sys);
+
+
+- Simulación en tiempo discreto VS datos reales
+%-------------------------------------
+%Importación de datos reales
+%Selección la primera columna
+data_x = datos(:, 1);
+% Crea una variable para almacenar los datos
+DatosReales = data_x(:);
+%-------------------------------------
+% Gráficas
+close all
+t2 = linspace(0, 0.8, 2243);
+x0=[0 0];
+[y, t1,x1] = lsim(sys, 4*ones(size(t2)),t2,x0);
+% Graficar la respuesta al impulso del sistema discreto
+figure(1)
+plot(t2,y,'r')
+hold on
+step(4*d_sys,'b');
+legend('Discreto','Reales')
+title('Respuesta al Impulso del Sistema Discreto (ZOH)');
+xlabel('Muestras');
+ylabel('Voltaje [V]');
+grid on
+
+
+4. Creación de un controlador por retro de estado y precompensación
+%%
+close all; clc;
+%Condiciones de diseño
+mp = 15;       % sobrenivel
+ts = 0.2;      % tiempo de establecimiento
+z = sqrt(log(mp)^2)/sqrt(pi^2 + log(mp)^2); % Amortiguamiento
+wn = 4/(ts*z);                              % Frecuencia
+denominador = [1 2*wn*z wn^2];
+p =roots(denominador);
+% Discretización de los polos deseados
+pd= exp(p.*Ts);
+% ASIGNACIÓN DE POLOS
+% Vector de ganacias para la retroalimentación de estado
+k = acker(Ad,Bd,pd);
+% Valor de referencia
+reff=3;
+% Nuevas matrices del sistema en lazo cerrado (controlado)
+% f: Feedforward (Retroalimentación)
+Af= Ad-(Bd*k);
+H = inv(Cd*inv(eye(2)-Af)*Bd);   % Precompensación
+Bf = Bd*H*reff;
+sysDiscreto = ss(Af,Bf,CM,D,Ts);
+step(sysDiscreto)
+title('Sistema discretizado en lazo cerrado (Controlado)')
+ylabel('Voltaje en el Capacitor [V]'); xlabel('Tiempo')
+legend('Sistema con controlador')
+
+%%
+clear up x
+close all;
+x(:,1)=[0 0]';
+for i=1:120
+    up(i)=-k*x(:,i)+H*3;
+    x(:,i+1)=Ad*x(:,i)+Bd*up(i);
+end
+figure(1)
+stairs(up)
+title('Esfuerzo de control - Sistema discretizado')
+ylabel('Voltaje entregado por el DAC [V]'); xlabel('Tiempo')
+legend('Sistema con controlador')
+xlimit=[0 120];
+figure(2)
+stairs(x(1,:))
+title('Esfuerzo de control - Sistema discretizado')
+ylabel('Corriente en el circuito [A]'); xlabel('Tiempo')
+legend('Sistema con controlador')
+figure(3)
+stairs(x(2,:))
+title('Esfuerzo de control - Sistema discretizado')
+ylabel('Voltaje en el Capacitor [V]'); xlabel('Tiempo')
+legend('Sistema con controlador')
+
+
+5.	Acción integral
+%% ACCIÓN INTEGRAL
+pNuevo=[p(1),p(2),10*p(1)];                         
+poloDiscreto_AccionInt = exp(real(pNuevo).*Ts);     
+Af_Intg = [Ad [0;0];-Cd 1];
+Bf_Intg = [Bd; 0];
+% Vector de ganacias
+K2 = acker(Af_Intg,Bf_Intg,poloDiscreto_AccionInt);
+K_Retro = K2(1:length(K2)-1); % Ganacia de Retroalimentación
+K_Intg = K2(length(K2));      % Ganacia Integral
+% Matrices aumentadas discretas en lazo cerrado
+Af_Exp = [Af_Intg - Bf_Intg*K2];
+Bf_Exp = [zeros(rank(A),1);1];
+Cf_Exp = [Cd 0];
+% Space State
+sysDiscreto_Int = ss(Af_Exp,Bf_Exp,Cf_Exp,D,Ts);
+
+-	Simulación en tiempo discreto del sistema con acción integral y perturbación
+%%
+clear x2 up2 error; clc; close all;
+% Se debe expandir el vector porque el control integral es un variabe de estado más que se añade al sistema
+x2(:,1) = [0 0 0]'; % x2 = [IL Vc Error]
+r = 3;
+pert=0;
+for i = 1:400
+    if i >= 200
+        pert = 0.5;
+    end
+    up2(i) = -K2*x2(:,i) + pert;
+    x2(:,i+1) = Af_Intg*x2(:,i) + Bf_Intg*up2(i) + [0 0 1]'*r;
+end
+figure (1)
+stairs(up2)
+title('Esfuerzo de control - Sistema discretizado')
+ylabel('Voltaje entregado por el DAC [V]'); xlabel('Tiempo')
+legend('Sistema con controlador')
+figure (2)
+stairs(x2(2,:))
+title('Esfuerzo de control - Sistema discretizado')
+ylabel('Voltaje en el Capacitor [V]'); xlabel('Tiempo')
+legend('Sistema con controlador')
+
+
